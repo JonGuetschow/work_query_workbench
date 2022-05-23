@@ -1,0 +1,617 @@
+exec drop_temp_tables_sp
+GO
+
+CREATE TABLE #Families (Family_Key int, Head_of_Household_id nchar(10),  Family_Name nvarchar(500), total_levels int)
+CREATE TABLE #Family_Constituent (constituent_key int, family_key int, family_head_of_household nchar(10), family_name nvarchar(500), constituent_id_number nchar(10), constituent_name nvarchar(200),spouse_constituent_key int, spouse_id_number nchar(10), spouse_name nvarchar(200), lvl int)
+
+select distinct type 
+into #relationships
+from core.constituent_relationship 
+where type in ('Child','Grandchild','Grandparent','Great Grand Child','Great Grand Parent','Parent','Stepchild','Stepparent')
+
+select distinct constituent_id_number, 
+                constituent_key, 
+				full_name as constituent_name,
+				cast('' as nchar(10)) as spouse_id_number,
+				cast(0 as int) as spouse_constituent_key,
+				cast('' as nvarchar(200)) as spouse_name,
+				cast(999 as int) lvl, 
+				cast(constituent_id_number as nchar(10)) as household_id ,
+				cast('' as char(1)) as P,          --Parent
+				cast('' as char(1)) as GP,		  --Grand Parent
+				cast('' as char(1)) as GGP,		  --Great Grand Parent
+				cast('' as char(1)) as C,		  --Child
+				cast('' as char(1)) as GC,		  --Grand Child
+				cast('' as char(1)) as GGC,		  --Great Grand Child
+				cast('' as char(1)) as SP,		  --Somone's Parent
+				cast('' as char(1)) as SGP,		  --Somone's Grand Parent
+				cast('' as char(1)) as SGGP,		  --Somone's Great Grand Parent
+				cast('' as char(1)) as SC,		  --Somone's Child
+				cast('' as char(1)) as SGC,		  --Somone's Grand Child
+				cast('' as char(1)) as SGGC		  --Somone's Great Grand Child
+  into #alumni 
+  from core.person_summary 
+  where primary_affiliation in ('Alumnus/na','Student')
+
+delete #alumni 
+  from #alumni a
+ where not exists(select * from core.constituent_relationship where constituent_key = a.constituent_key and type not in (select * from #relationships))
+
+
+select * 
+  into #cr 
+  from core.constituent_relationship 
+ where constituent_key in (select constituent_key from #alumni) 
+   and related_constituent_key in (select constituent_key from #alumni)
+
+
+
+update #alumni
+   set P     = case when p.constituent_key is not null then 'Y' else '' end,
+	   GP	 = case when gp.constituent_key is not null then 'Y' else '' end,
+	   GGP	 = case when ggp.constituent_key is not null then 'Y' else '' end,
+	   C	 = case when c.constituent_key is not null then 'Y' else '' end,
+	   GC	 = case when gc.constituent_key is not null then 'Y' else '' end,
+	   GGC	 = case when ggc.constituent_key is not null then 'Y' else '' end,
+	   SP	 = case when sp.constituent_key is not null then 'Y' else '' end,
+	   SGP	 = case when sgp.constituent_key is not null then 'Y' else '' end,
+	   SGGP	 = case when sggp.constituent_key is not null then 'Y' else '' end,
+	   SC	 = case when sc.constituent_key is not null then 'Y' else '' end,
+	   SGC	 = case when sgc.constituent_key is not null then 'Y' else '' end,
+	   SGGC	 = case when sggc.constituent_key is not null then 'Y' else '' end
+  from #alumni a
+  left join #cr p on a.constituent_key = p.constituent_key and p.type = 'Parent'
+  left join #cr gp on a.constituent_key = gp.constituent_key and gp.type = 'Grandparent'
+  left join #cr ggp on a.constituent_key = ggp.constituent_key and ggp.type = 'Great Grand Parent'
+  left join #cr c on a.constituent_key = c.constituent_key and c.type = 'Child'
+  left join #cr gc on a.constituent_key = gc.constituent_key and gc.type = 'Grandchild'
+  left join #cr ggc on a.constituent_key = ggc.constituent_key and ggc.type = 'Great Grand Child'
+  left join #cr sp on a.constituent_key = sp.related_constituent_key and sp.type = 'Child'
+  left join #cr sgp on a.constituent_key = sgp.related_constituent_key and sgp.type = 'Grandchild'
+  left join #cr sggp on a.constituent_key = sggp.related_constituent_key and sggp.type = 'Great Grand Child'
+  left join #cr sc on a.constituent_key = sc.related_constituent_key and sc.type = 'Parent'
+  left join #cr sgc on a.constituent_key = sgc.related_constituent_key and sgc.type = 'Grandparent'
+  left join #cr sggc on a.constituent_key = sggc.related_constituent_key and sggc.type = 'Great Grand Parent'
+
+
+
+update a
+   set spouse_id_number = related_constituent_id_number
+      ,spouse_constituent_key = related_constituent_key
+	  ,spouse_name = related_constituent_name
+  from #alumni a
+  join core.constituent_relationship cr on a.constituent_key = cr.constituent_key and cr.type = 'Spouse'
+  join #alumni spouse on spouse.constituent_key = cr.related_constituent_key
+
+
+update a
+   set spouse_id_number = related_constituent_id_number
+      ,spouse_constituent_key = related_constituent_key
+	  ,spouse_name = related_constituent_name
+  from #alumni a
+  join core.constituent_relationship cr on a.constituent_key = cr.constituent_key and cr.type = 'Late Spouse'
+  join #alumni spouse on spouse.constituent_key = cr.related_constituent_key
+  where a.spouse_id_number = ''
+
+update a
+   set spouse_id_number = related_constituent_id_number
+      ,spouse_constituent_key = related_constituent_key
+	  ,spouse_name = related_constituent_name
+  from #alumni a
+  join core.constituent_relationship cr on a.constituent_key = cr.constituent_key and cr.type = 'Surviving Spouse'
+  join #alumni spouse on spouse.constituent_key = cr.related_constituent_key
+  where a.spouse_id_number = ''
+
+
+update a
+   set spouse_id_number = related_constituent_id_number
+      ,spouse_constituent_key = related_constituent_key
+	  ,spouse_name = related_constituent_name
+  from #alumni a
+  join core.constituent_relationship cr on a.constituent_key = cr.constituent_key and cr.type = 'Ex-Spouse' and status = 'Deceased'
+  join #alumni spouse on spouse.constituent_key = cr.related_constituent_key
+  where a.spouse_id_number = ''
+
+
+
+select distinct spouse_id_number 
+  into #multi_spouse
+  from #alumni 
+ where spouse_id_Number <> '' 
+ group by spouse_id_number 
+ having count(*) > 1
+
+ update #alumni 
+    set household_id = ms.spouse_id_number
+	   ,lvl = 998
+   from #alumni a
+   join #multi_spouse ms on a.spouse_id_number = ms.spouse_id_number
+  where a.constituent_id_number not in (select * from #multi_spouse)
+
+ update #alumni
+    set lvl = 998
+   from #alumni a
+   join #multi_spouse ms on a.constituent_id_number = ms.spouse_id_number
+
+ update #alumni 
+    set household_id = spouse_id_number
+  where spouse_id_number < household_id
+    and spouse_id_number <> ''
+	and lvl <> 998
+
+
+
+update a
+  set P      = case when a.p <> 'Y' and b.p = 'Y' then 'Y' else a.p end,
+      GP	 = case when a.gp <> 'Y' and b.gp = 'Y' then 'Y' else a.gp end,
+      GGP	 = case when a.ggp <> 'Y' and b.ggp = 'Y' then 'Y' else a.ggp end,
+      C	     = case when a.c <> 'Y' and b.c = 'Y' then 'Y' else a.c end,
+      GC	 = case when a.gc <> 'Y' and b.gc = 'Y' then 'Y' else a.gc end,
+      GGC	 = case when a.ggc <> 'Y' and b.ggc = 'Y' then 'Y' else a.ggc end,
+      SP	 = case when a.sp <> 'Y' and b.sp = 'Y' then 'Y' else a.sp end,
+      SGP	 = case when a.sgp <> 'Y' and b.sgp = 'Y' then 'Y' else a.sgp end,
+      SGGP	 = case when a.sggp <> 'Y' and b.sggp = 'Y' then 'Y' else a.sggp end,
+      SC	 = case when a.sc <> 'Y' and b.sc = 'Y' then 'Y' else a.sc end,
+      SGC	 = case when a.sgc <> 'Y' and b.sgc = 'Y' then 'Y' else a.sgc end,
+      SGGC	 = case when a.sggc <> 'Y' and b.sggc = 'Y' then 'Y' else a.sggc end
+  from #alumni a
+  join #alumni b on a.spouse_constituent_key = b.constituent_key
+
+
+  --select * from #alumni 
+
+  -- select * from core.constituent_relationship where constituent_name like '%Robert%Reiman%'
+  -- select * from #alumni where constituent_id_number in ('0009458350','0009458351','0010058773')
+  -- select * from #alumni where constituent_id_number in ('0009736460','0009736461','0010212710','0009736401','0001217401','0010162142')
+  -- select * from core.constituent_relationship where constituent_id_number = '0010162142'
+  -- select * from core.person_summary where constituent_id_number = '0010162142'
+
+update #alumni
+   set lvl = 1
+ where c = ''
+   and gc = ''
+   and ggc  = ''
+   and sc = ''
+   and sgc = ''
+   and sggc = ''
+
+
+
+--truncate table #Families
+INSERT #Families
+select distinct
+       constituent_key, 
+       constituent_id_number, 
+	   constituent_name + case when spouse_id_number <> '' then ' and ' + spouse_name else + ' ' end + ' Family', 
+	   1 
+  from #alumni 
+ where lvl = 1 
+   and constituent_id_number = household_id
+ 
+
+
+
+INSERT #Family_Constituent
+SELECT a.constituent_key,
+       f.Family_Key,
+	   f.Head_of_Household_id,
+	   f.Family_Name,
+	   a.constituent_id_number,
+	   a.constituent_name,
+	   a.spouse_constituent_key,
+	   a.spouse_id_number,
+	   a.spouse_name,
+	   1
+  FROM #alumni a
+  JOIN #Families f ON a.household_id = f.Head_of_Household_id
+
+
+declare @level int = 0
+
+--select * from #alumni
+--select * from #Family_Constituent
+
+WHILE @@ROWCOUNT > 0
+BEGIN
+		set @level = @level + 1
+
+		INSERT #Family_Constituent
+		SELECT ins.* FROM
+		(SELECT a.constituent_key,
+			   fc.Family_Key,
+			   fc.family_head_of_household,
+			   fc.Family_Name,
+			   a.constituent_id_number,
+			   a.constituent_name,
+			   a.spouse_constituent_key,
+			   a.spouse_id_number,
+			   a.spouse_name,
+			   @level + 1 as lvl
+		  FROM #alumni a
+		  JOIN #cr cr on a.constituent_key = cr.constituent_key and cr.type = 'Child'
+		  JOIN #Family_Constituent fc on fc.constituent_key = cr.related_constituent_key and fc.lvl = @level
+		  UNION
+		SELECT a.constituent_key,
+			   fc.Family_Key,
+			   fc.family_head_of_household,
+			   fc.Family_Name,
+			   a.constituent_id_number,
+			   a.constituent_name,
+			   a.spouse_constituent_key,
+			   a.spouse_id_number,
+			   a.spouse_name,
+			   @level + 1
+		  FROM #alumni a
+		  JOIN #cr cr on a.constituent_key = cr.related_constituent_key and cr.type = 'Parent'
+		  JOIN #Family_Constituent fc on fc.constituent_key = cr.constituent_key and fc.lvl = @level
+		  UNION
+		SELECT a.constituent_key,
+			   fc.Family_Key,
+			   fc.family_head_of_household,
+			   fc.Family_Name,
+			   a.constituent_id_number,
+			   a.constituent_name,
+			   a.spouse_constituent_key,
+			   a.spouse_id_number,
+			   a.spouse_name,
+			   @level + 1
+		  FROM #alumni a
+		  JOIN #cr cr on a.spouse_constituent_key = cr.constituent_key and cr.type = 'Child'
+		  JOIN #Family_Constituent fc on fc.constituent_key = cr.related_constituent_key and fc.lvl = @level
+		  UNION
+		SELECT a.constituent_key,
+			   fc.Family_Key,
+			   fc.family_head_of_household,
+			   fc.Family_Name,
+			   a.constituent_id_number,
+			   a.constituent_name,
+			   a.spouse_constituent_key,
+			   a.spouse_id_number,
+			   a.spouse_name,
+			   @level + 1
+		  FROM #alumni a
+		  JOIN #cr cr on a.spouse_constituent_key = cr.related_constituent_key and cr.type = 'Parent'
+		  JOIN #Family_Constituent fc on fc.constituent_key = cr.constituent_key and fc.lvl = @level
+		  UNION
+		SELECT a.constituent_key,
+			   fc.Family_Key,
+			   fc.family_head_of_household,
+			   fc.Family_Name,
+			   a.constituent_id_number,
+			   a.constituent_name,
+			   a.spouse_constituent_key,
+			   a.spouse_id_number,
+			   a.spouse_name,
+			   @level + 1
+		  FROM #alumni a
+		  JOIN #cr cr on a.constituent_key = cr.constituent_key and cr.type = 'Child'
+		  JOIN #Family_Constituent fc on fc.spouse_constituent_key = cr.related_constituent_key and fc.lvl = @level
+		  UNION
+		SELECT a.constituent_key,
+			   fc.Family_Key,
+			   fc.family_head_of_household,
+			   fc.Family_Name,
+			   a.constituent_id_number,
+			   a.constituent_name,
+			   a.spouse_constituent_key,
+			   a.spouse_id_number,
+			   a.spouse_name,
+			   @level + 1
+		  FROM #alumni a
+		  JOIN #cr cr on a.constituent_key = cr.related_constituent_key and cr.type = 'Parent'
+		  JOIN #Family_Constituent fc on fc.spouse_constituent_key = cr.constituent_key and fc.lvl = @level
+		  UNION
+		SELECT a.constituent_key,
+			   fc.Family_Key,
+			   fc.family_head_of_household,
+			   fc.Family_Name,
+			   a.constituent_id_number,
+			   a.constituent_name,
+			   a.spouse_constituent_key,
+			   a.spouse_id_number,
+			   a.spouse_name,
+			   @level + 1
+		  FROM #alumni a
+		  JOIN #cr cr on a.spouse_constituent_key = cr.constituent_key and cr.type = 'Child'
+		  JOIN #Family_Constituent fc on fc.spouse_constituent_key = cr.related_constituent_key and fc.lvl = @level
+		  UNION
+		SELECT a.constituent_key,
+			   fc.Family_Key,
+			   fc.family_head_of_household,
+			   fc.Family_Name,
+			   a.constituent_id_number,
+			   a.constituent_name,
+			   a.spouse_constituent_key,
+			   a.spouse_id_number,
+			   a.spouse_name,
+			   @level + 1
+		  FROM #alumni a
+		  JOIN #cr cr on a.spouse_constituent_key = cr.related_constituent_key and cr.type = 'Parent'
+		  JOIN #Family_Constituent fc on fc.spouse_constituent_key = cr.constituent_key and fc.lvl = @level
+
+		UNION 
+
+		SELECT a.constituent_key,
+			   fc.Family_Key,
+			   fc.family_head_of_household,
+			   fc.Family_Name,
+			   a.constituent_id_number,
+			   a.constituent_name,
+			   a.spouse_constituent_key,
+			   a.spouse_id_number,
+			   a.spouse_name,
+			   @level + 2
+		  FROM #alumni a
+		  JOIN #cr cr on a.constituent_key = cr.constituent_key and cr.type = 'Grandchild'
+		  JOIN #Family_Constituent fc on fc.constituent_key = cr.related_constituent_key and fc.lvl = @level 
+		  UNION
+		SELECT a.constituent_key,
+			   fc.Family_Key,
+			   fc.family_head_of_household,
+			   fc.Family_Name,
+			   a.constituent_id_number,
+			   a.constituent_name,
+			   a.spouse_constituent_key,
+			   a.spouse_id_number,
+			   a.spouse_name,
+			   @level + 2
+		  FROM #alumni a
+		  JOIN #cr cr on a.constituent_key = cr.related_constituent_key and cr.type = 'Grandparent'
+		  JOIN #Family_Constituent fc on fc.constituent_key = cr.constituent_key and fc.lvl = @level
+		  UNION
+		SELECT a.constituent_key,
+			   fc.Family_Key,
+			   fc.family_head_of_household,
+			   fc.Family_Name,
+			   a.constituent_id_number,
+			   a.constituent_name,
+			   a.spouse_constituent_key,
+			   a.spouse_id_number,
+			   a.spouse_name,
+			   @level + 2
+		  FROM #alumni a
+		  JOIN #cr cr on a.spouse_constituent_key = cr.constituent_key and cr.type = 'Grandchild'
+		  JOIN #Family_Constituent fc on fc.constituent_key = cr.related_constituent_key and fc.lvl = @level 
+		  UNION
+		SELECT a.constituent_key,
+			   fc.Family_Key,
+			   fc.family_head_of_household,
+			   fc.Family_Name,
+			   a.constituent_id_number,
+			   a.constituent_name,
+			   a.spouse_constituent_key,
+			   a.spouse_id_number,
+			   a.spouse_name,
+			   @level + 2
+		  FROM #alumni a
+		  JOIN #cr cr on a.spouse_constituent_key = cr.related_constituent_key and cr.type = 'Grandparent'
+		  JOIN #Family_Constituent fc on fc.constituent_key = cr.constituent_key and fc.lvl = @level 
+		  UNION
+		SELECT a.constituent_key,
+			   fc.Family_Key,
+			   fc.family_head_of_household,
+			   fc.Family_Name,
+			   a.constituent_id_number,
+			   a.constituent_name,
+			   a.spouse_constituent_key,
+			   a.spouse_id_number,
+			   a.spouse_name,
+			   @level + 2
+		  FROM #alumni a
+		  JOIN #cr cr on a.constituent_key = cr.constituent_key and cr.type = 'Grandchild'
+		  JOIN #Family_Constituent fc on fc.spouse_constituent_key = cr.related_constituent_key and fc.lvl = @level 
+		  UNION
+		SELECT a.constituent_key,
+			   fc.Family_Key,
+			   fc.family_head_of_household,
+			   fc.Family_Name,
+			   a.constituent_id_number,
+			   a.constituent_name,
+			   a.spouse_constituent_key,
+			   a.spouse_id_number,
+			   a.spouse_name,
+			   @level + 2
+		  FROM #alumni a
+		  JOIN #cr cr on a.constituent_key = cr.related_constituent_key and cr.type = 'Grandparent'
+		  JOIN #Family_Constituent fc on fc.spouse_constituent_key = cr.constituent_key and fc.lvl = @level 
+		  UNION
+		SELECT a.constituent_key,
+			   fc.Family_Key,
+			   fc.family_head_of_household,
+			   fc.Family_Name,
+			   a.constituent_id_number,
+			   a.constituent_name,
+			   a.spouse_constituent_key,
+			   a.spouse_id_number,
+			   a.spouse_name,
+			   @level + 2
+		  FROM #alumni a
+		  JOIN #cr cr on a.spouse_constituent_key = cr.constituent_key and cr.type = 'Grandchild'
+		  JOIN #Family_Constituent fc on fc.spouse_constituent_key = cr.related_constituent_key and fc.lvl = @level 
+		  UNION
+		SELECT a.constituent_key,
+			   fc.Family_Key,
+			   fc.family_head_of_household,
+			   fc.Family_Name,
+			   a.constituent_id_number,
+			   a.constituent_name,
+			   a.spouse_constituent_key,
+			   a.spouse_id_number,
+			   a.spouse_name,
+			   @level + 2
+		  FROM #alumni a
+		  JOIN #cr cr on a.spouse_constituent_key = cr.related_constituent_key and cr.type = 'Grandparent'
+		  JOIN #Family_Constituent fc on fc.spouse_constituent_key = cr.constituent_key and fc.lvl = @level 
+
+		  UNION 
+
+		SELECT a.constituent_key,
+			   fc.Family_Key,
+			   fc.family_head_of_household,
+			   fc.Family_Name,
+			   a.constituent_id_number,
+			   a.constituent_name,
+			   a.spouse_constituent_key,
+			   a.spouse_id_number,
+			   a.spouse_name,
+			   @level + 3
+		  FROM #alumni a
+		  JOIN #cr cr on a.constituent_key = cr.constituent_key and cr.type = 'Great Grand Child'
+		  JOIN #Family_Constituent fc on fc.constituent_key = cr.related_constituent_key and fc.lvl = @level 
+		  UNION
+		SELECT a.constituent_key,
+			   fc.Family_Key,
+			   fc.family_head_of_household,
+			   fc.Family_Name,
+			   a.constituent_id_number,
+			   a.constituent_name,
+			   a.spouse_constituent_key,
+			   a.spouse_id_number,
+			   a.spouse_name,
+			   @level + 3
+		  FROM #alumni a
+		  JOIN #cr cr on a.constituent_key = cr.related_constituent_key and cr.type = 'Great Grand Parent'
+		  JOIN #Family_Constituent fc on fc.constituent_key = cr.constituent_key and fc.lvl = @level 
+		  UNION
+		SELECT a.constituent_key,
+			   fc.Family_Key,
+			   fc.family_head_of_household,
+			   fc.Family_Name,
+			   a.constituent_id_number,
+			   a.constituent_name,
+			   a.spouse_constituent_key,
+			   a.spouse_id_number,
+			   a.spouse_name,
+			   @level + 3
+		  FROM #alumni a
+		  JOIN #cr cr on a.spouse_constituent_key = cr.constituent_key and cr.type = 'Great Grand Child'
+		  JOIN #Family_Constituent fc on fc.constituent_key = cr.related_constituent_key and fc.lvl = @level 
+		  UNION
+		SELECT a.constituent_key,
+			   fc.Family_Key,
+			   fc.family_head_of_household,
+			   fc.Family_Name,
+			   a.constituent_id_number,
+			   a.constituent_name,
+			   a.spouse_constituent_key,
+			   a.spouse_id_number,
+			   a.spouse_name,
+			   @level + 3
+		  FROM #alumni a
+		  JOIN #cr cr on a.spouse_constituent_key = cr.related_constituent_key and cr.type = 'Great Grand Parent'
+		  JOIN #Family_Constituent fc on fc.constituent_key = cr.constituent_key and fc.lvl = @level
+		  UNION
+		SELECT a.constituent_key,
+			   fc.Family_Key,
+			   fc.family_head_of_household,
+			   fc.Family_Name,
+			   a.constituent_id_number,
+			   a.constituent_name,
+			   a.spouse_constituent_key,
+			   a.spouse_id_number,
+			   a.spouse_name,
+			   @level + 3
+		  FROM #alumni a
+		  JOIN #cr cr on a.constituent_key = cr.constituent_key and cr.type = 'Great Grand Child'
+		  JOIN #Family_Constituent fc on fc.spouse_constituent_key = cr.related_constituent_key and fc.lvl = @level 
+		  UNION
+		SELECT a.constituent_key,
+			   fc.Family_Key,
+			   fc.family_head_of_household,
+			   fc.Family_Name,
+			   a.constituent_id_number,
+			   a.constituent_name,
+			   a.spouse_constituent_key,
+			   a.spouse_id_number,
+			   a.spouse_name,
+			   @level + 3
+		  FROM #alumni a
+		  JOIN #cr cr on a.constituent_key = cr.related_constituent_key and cr.type = 'Great Grand Parent'
+		  JOIN #Family_Constituent fc on fc.spouse_constituent_key = cr.constituent_key and fc.lvl = @level 
+		  UNION
+		SELECT a.constituent_key,
+			   fc.Family_Key,
+			   fc.family_head_of_household,
+			   fc.Family_Name,
+			   a.constituent_id_number,
+			   a.constituent_name,
+			   a.spouse_constituent_key,
+			   a.spouse_id_number,
+			   a.spouse_name,
+			   @level + 3
+		  FROM #alumni a
+		  JOIN #cr cr on a.spouse_constituent_key = cr.constituent_key and cr.type = 'Great Grand Child'
+		  JOIN #Family_Constituent fc on fc.spouse_constituent_key = cr.related_constituent_key and fc.lvl = @level 
+		  UNION
+		SELECT a.constituent_key,
+			   fc.Family_Key,
+			   fc.family_head_of_household,
+			   fc.Family_Name,
+			   a.constituent_id_number,
+			   a.constituent_name,
+			   a.spouse_constituent_key,
+			   a.spouse_id_number,
+			   a.spouse_name,
+			   @level + 3
+		  FROM #alumni a
+		  JOIN #cr cr on a.spouse_constituent_key = cr.related_constituent_key and cr.type = 'Great Grand Parent'
+		  JOIN #Family_Constituent fc on fc.spouse_constituent_key = cr.constituent_key and fc.lvl = @level
+		) ins
+		LEFT JOIN #Family_Constituent fam_con on ins.constituent_key = fam_con.constituent_key
+											 and ins.family_key = fam_con.family_key
+											 and ins.spouse_constituent_key = fam_con.spouse_constituent_key
+		WHERE fam_con.constituent_key is null
+
+		
+END
+
+
+
+
+UPDATE f
+   SET total_levels = fc.lvl
+  FROM #Families f
+  JOIN (SELECT family_key,
+               max(lvl) as lvl
+         FROM #Family_Constituent
+		 GROUP BY family_key
+		) fc on f.Family_Key = fc.family_key
+
+
+select * into report_builder.tmp_Family_Constituent from #Family_Constituent
+select * into report_builder.tmp_Families from #Families
+
+select * from report_builder.tmp_Family_Constituent
+select * from report_builder.tmp_Families
+
+select * from #Family_Constituent where family_head_of_household in (
+select Head_of_Household_id from #Families where total_levels >= 4	
+) order by family_head_of_household, lvl, constituent_id_number
+
+
+
+/*
+  select * from #Family_Constituent where family_head_of_household in ('0009788669')
+
+  select * from core.person where full_name like '%Jenn%Copeland%'
+
+    select * from #Family_Constituent where lvl > 4
+
+select * from core.constituent_relationship where constituent_id_number = '0009524431'
+
+
+ declare @level int = 1
+
+
+ select constituent_id_number  
+   from #alumni a
+   join core.constituent_relationship cr on a.constituent_key = cr.constituent_key and cr.type in ('Grandparent','Great Grand Parent','Parent')
+  where not exists (select * from core.constituent_relationship where constituent_key = a.constituent_key and type in ('Child','Grandchild','Great Grand Child'))
+
+select * into report_builder.tmp_Multi_Gen_Families from #families
+select * into report_builder.tmp_Multi_Gen_Family_Constituent from #Family_Constituent
+
+
+select total_levels, count(*) from #families group by total_levels order by total_levels desc
+
+*/
